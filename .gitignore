@@ -1,0 +1,16 @@
+# Build artifacts
+c_source/*.o
+c_source/stplugin.c
+c_source/stplugin.h
+
+# Test data (generated)
+tests/test_pairwise.csv
+tests/test_match_*.csv
+
+# Stata logs
+*.log
+*.smcl
+
+# OS files
+.DS_Store
+Thumbs.db
