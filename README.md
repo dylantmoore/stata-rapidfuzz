@@ -7,6 +7,16 @@ This package wraps the rapidfuzz-cpp header-only C++ library as a Stata plugin, 
 ## Installation
 
 ```stata
+* macOS:
+net install rapidfuzz_mac, from("https://raw.githubusercontent.com/dylantmoore/stata-rapidfuzz/main") replace
+
+* Linux:
+net install rapidfuzz_linux, from("https://raw.githubusercontent.com/dylantmoore/stata-rapidfuzz/main") replace
+
+* Windows:
+net install rapidfuzz_win, from("https://raw.githubusercontent.com/dylantmoore/stata-rapidfuzz/main") replace
+
+* All platforms:
 net install rapidfuzz, from("https://raw.githubusercontent.com/dylantmoore/stata-rapidfuzz/main") replace
 ```
 

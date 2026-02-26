@@ -1,0 +1,14 @@
+v 3
+d rapidfuzz: String similarity and fuzzy matching using RapidFuzz algorithms
+d
+d Implements Levenshtein, Jaro, Jaro-Winkler, token-based fuzzy ratios,
+d and more. Includes pairwise comparison and fuzzy matching commands.
+d
+d Based on: https://github.com/StrategicProjects/RapidFuzz (MIT License)
+d
+d Distribution-Date: 20260226
+d
+f rapidfuzz.ado
+f rapidfuzz_match.ado
+f rapidfuzz.sthlp
+f rapidfuzz_plugin.windows-x86_64.plugin

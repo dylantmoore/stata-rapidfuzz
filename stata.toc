@@ -1,5 +1,8 @@
 v 3
 d rapidfuzz - String similarity and fuzzy matching for Stata
 d
-d Distribution-Date: 20260222
-p rapidfuzz
+d Distribution-Date: 20260226
+p rapidfuzz All platforms (macOS, Linux, Windows)
+p rapidfuzz_mac macOS only (ARM64 + Intel)
+p rapidfuzz_linux Linux only (x86_64)
+p rapidfuzz_win Windows only (x86_64)
