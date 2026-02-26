@@ -1,16 +1,18 @@
-*! version 1.0.0  22feb2026
+*! version 1.1.0  23feb2026
 *! Pairwise string similarity using RapidFuzz algorithms
 *!
 *! Syntax:
 *!   rapidfuzz str1 str2 [if] [in], GENerate(newvar)
-*!       [Method(string) NOCASE REPlace PREfix_weight(real 0.1)]
+*!       [Method(string) NOCASE REPlace PREfix_weight(real 0.1)
+*!        Weights(numlist integer min=3 max=3 >0) NOPAD]
 
 program define rapidfuzz, rclass
     version 14.0
 
     syntax varlist(min=2 max=2 string) [if] [in], ///
         GENerate(name) ///
-        [Method(string) NOCASE REPlace PREfix_weight(real 0.1)]
+        [Method(string) NOCASE REPlace PREfix_weight(real 0.1) ///
+         Weights(numlist integer min=3 max=3 >0) NOPAD]
 
     * --- Default method ---
     if "`method'" == "" local method "ratio"
@@ -23,8 +25,10 @@ program define rapidfuzz, rclass
     * Normalized similarity (0-100)
     local valid_methods "`valid_methods' jaro jaro_winkler norm_lev norm_osa"
     local valid_methods "`valid_methods' norm_hamming norm_indel norm_lcsseq"
+    local valid_methods "`valid_methods' norm_prefix norm_postfix"
     * Raw distance (integer)
     local valid_methods "`valid_methods' levenshtein osa hamming indel lcsseq"
+    local valid_methods "`valid_methods' prefix postfix"
     local method_ok 0
     foreach m of local valid_methods {
         if "`method'" == "`m'" local method_ok 1
@@ -33,6 +37,22 @@ program define rapidfuzz, rclass
         display as error "invalid method: `method'"
         display as error "valid methods: `valid_methods'"
         exit 198
+    }
+
+    * --- Validate weights option ---
+    if "`weights'" != "" {
+        if "`method'" != "levenshtein" & "`method'" != "norm_lev" {
+            display as error "weights() only allowed with levenshtein or norm_lev"
+            exit 198
+        }
+    }
+
+    * --- Validate nopad option ---
+    if "`nopad'" != "" {
+        if "`method'" != "hamming" & "`method'" != "norm_hamming" {
+            display as error "nopad only allowed with hamming or norm_hamming"
+            exit 198
+        }
     }
 
     * --- Handle replace ---
@@ -68,6 +88,17 @@ program define rapidfuzz, rclass
         local pw_flag "pw=`prefix_weight'"
     }
 
+    local wt_flag ""
+    if "`weights'" != "" {
+        local wt_ins : word 1 of `weights'
+        local wt_del : word 2 of `weights'
+        local wt_rep : word 3 of `weights'
+        local wt_flag "wt=`wt_ins',`wt_del',`wt_rep'"
+    }
+
+    local nopad_flag ""
+    if "`nopad'" != "" local nopad_flag "nopad"
+
     * --- Stable merge key ---
     tempvar merge_id
     quietly gen long `merge_id' = _n
@@ -77,7 +108,7 @@ program define rapidfuzz, rclass
     quietly keep if `touse'
 
     plugin call rapidfuzz_plugin `str1' `str2' `generate', ///
-        pairwise `method' `nocase_flag' `pw_flag'
+        pairwise `method' `nocase_flag' `pw_flag' `wt_flag' `nopad_flag'
 
     local rc = _rc
     if `rc' != 0 {
@@ -106,19 +137,21 @@ end
 
 * --- Plugin loader (cross-platform cascade) ---
 program define _rapidfuzz_load_plugin
-    capture program rapidfuzz_plugin, plugin using("rapidfuzz_plugin.darwin-arm64.plugin")
-    if _rc {
-        capture program rapidfuzz_plugin, plugin using("rapidfuzz_plugin.darwin-x86_64.plugin")
-        if _rc {
-            capture program rapidfuzz_plugin, plugin using("rapidfuzz_plugin.linux-x86_64.plugin")
-            if _rc {
-                capture program rapidfuzz_plugin, plugin using("rapidfuzz_plugin.windows-x86_64.plugin")
-                if _rc {
-                    display as error "rapidfuzz: cannot load plugin"
-                    display as error "Ensure .plugin files are installed."
-                    exit 601
+    local plugin_loaded 0
+    foreach plat in darwin-arm64 darwin-x86_64 linux-x86_64 windows-x86_64 {
+        if !`plugin_loaded' {
+            capture findfile rapidfuzz_plugin.`plat'.plugin
+            if _rc == 0 {
+                capture program rapidfuzz_plugin, plugin using("`r(fn)'")
+                if _rc == 0 | _rc == 110 {
+                    local plugin_loaded 1
                 }
             }
         }
+    }
+    if !`plugin_loaded' {
+        display as error "rapidfuzz: cannot load plugin"
+        display as error "Ensure .plugin files are installed."
+        exit 601
     }
 end

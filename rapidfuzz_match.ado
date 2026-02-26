@@ -1,10 +1,11 @@
-*! version 1.0.0  22feb2026
+*! version 1.1.0  23feb2026
 *! Fuzzy string matching against a reference dataset
 *!
 *! Syntax:
 *!   rapidfuzz_match str_var using filename, GENerate(score_var match_var)
 *!       [Uvar(varname) Method(string) THReshold(real 0)
-*!        NOCASE PREfix_weight(real 0.1)]
+*!        NOCASE PREfix_weight(real 0.1)
+*!        Weights(numlist integer min=3 max=3 >0) NOPAD]
 
 program define rapidfuzz_match, rclass
     version 14.0
@@ -12,7 +13,8 @@ program define rapidfuzz_match, rclass
     syntax varname(string) using/, ///
         GENerate(namelist min=2 max=2) ///
         [Uvar(string) Method(string) THReshold(real 0) ///
-         NOCASE PREfix_weight(real 0.1)]
+         NOCASE PREfix_weight(real 0.1) ///
+         Weights(numlist integer min=3 max=3 >0) NOPAD]
 
     * --- Parse output variable names ---
     gettoken score_var match_var : generate
@@ -27,7 +29,9 @@ program define rapidfuzz_match, rclass
     local valid_methods "`valid_methods' token_ratio partial_token_ratio wratio qratio"
     local valid_methods "`valid_methods' jaro jaro_winkler norm_lev norm_osa"
     local valid_methods "`valid_methods' norm_hamming norm_indel norm_lcsseq"
+    local valid_methods "`valid_methods' norm_prefix norm_postfix"
     local valid_methods "`valid_methods' levenshtein osa hamming indel lcsseq"
+    local valid_methods "`valid_methods' prefix postfix"
     local method_ok 0
     foreach m of local valid_methods {
         if "`method'" == "`m'" local method_ok 1
@@ -35,6 +39,22 @@ program define rapidfuzz_match, rclass
     if !`method_ok' {
         display as error "invalid method: `method'"
         exit 198
+    }
+
+    * --- Validate weights option ---
+    if "`weights'" != "" {
+        if "`method'" != "levenshtein" & "`method'" != "norm_lev" {
+            display as error "weights() only allowed with levenshtein or norm_lev"
+            exit 198
+        }
+    }
+
+    * --- Validate nopad option ---
+    if "`nopad'" != "" {
+        if "`method'" != "hamming" & "`method'" != "norm_hamming" {
+            display as error "nopad only allowed with hamming or norm_hamming"
+            exit 198
+        }
     }
 
     * --- Check output variables don't exist ---
@@ -106,13 +126,25 @@ program define rapidfuzz_match, rclass
     local pw_flag ""
     if "`method'" == "jaro_winkler" local pw_flag "pw=`prefix_weight'"
 
+    local wt_flag ""
+    if "`weights'" != "" {
+        local wt_ins : word 1 of `weights'
+        local wt_del : word 2 of `weights'
+        local wt_rep : word 3 of `weights'
+        local wt_flag "wt=`wt_ins',`wt_del',`wt_rep'"
+    }
+
+    local nopad_flag ""
+    if "`nopad'" != "" local nopad_flag "nopad"
+
     * --- Call plugin in match mode ---
     display as text "Matching `n_master' observations against " ///
         "`n_ref' reference strings..."
     display as text "  method: `method'"
 
     plugin call rapidfuzz_plugin `str_all' _best_score _best_idx, ///
-        match `method' `n_master' `n_ref' `nocase_flag' `pw_flag'
+        match `method' `n_master' `n_ref' `nocase_flag' `pw_flag' ///
+        `wt_flag' `nopad_flag'
 
     local rc = _rc
     if `rc' != 0 {
@@ -140,7 +172,8 @@ program define rapidfuzz_match, rclass
                  token_set partial_token_set token_ratio ///
                  partial_token_ratio wratio qratio ///
                  jaro jaro_winkler norm_lev norm_osa ///
-                 norm_hamming norm_indel norm_lcsseq {
+                 norm_hamming norm_indel norm_lcsseq ///
+                 norm_prefix norm_postfix {
         if "`method'" == "`m'" local is_similarity = 1
     }
     if `is_similarity' & `threshold' > 0 {
@@ -183,19 +216,21 @@ end
 * --- Plugin loader (shared with rapidfuzz.ado) ---
 capture program drop _rapidfuzz_load_plugin
 program define _rapidfuzz_load_plugin
-    capture program rapidfuzz_plugin, plugin using("rapidfuzz_plugin.darwin-arm64.plugin")
-    if _rc {
-        capture program rapidfuzz_plugin, plugin using("rapidfuzz_plugin.darwin-x86_64.plugin")
-        if _rc {
-            capture program rapidfuzz_plugin, plugin using("rapidfuzz_plugin.linux-x86_64.plugin")
-            if _rc {
-                capture program rapidfuzz_plugin, plugin using("rapidfuzz_plugin.windows-x86_64.plugin")
-                if _rc {
-                    display as error "rapidfuzz: cannot load plugin"
-                    display as error "Ensure .plugin files are installed."
-                    exit 601
+    local plugin_loaded 0
+    foreach plat in darwin-arm64 darwin-x86_64 linux-x86_64 windows-x86_64 {
+        if !`plugin_loaded' {
+            capture findfile rapidfuzz_plugin.`plat'.plugin
+            if _rc == 0 {
+                capture program rapidfuzz_plugin, plugin using("`r(fn)'")
+                if _rc == 0 | _rc == 110 {
+                    local plugin_loaded 1
                 }
             }
         }
+    }
+    if !`plugin_loaded' {
+        display as error "rapidfuzz: cannot load plugin"
+        display as error "Ensure .plugin files are installed."
+        exit 601
     }
 end
