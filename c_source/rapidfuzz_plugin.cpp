@@ -17,6 +17,7 @@ extern "C" {
 #include <cstring>
 #include <cstdio>
 #include <cctype>
+#include <cstdlib>
 #include <algorithm>
 #include <stdexcept>
 
@@ -41,9 +42,11 @@ enum Method {
     M_JARO, M_JARO_WINKLER,
     M_NORM_LEV, M_NORM_OSA,
     M_NORM_HAMMING, M_NORM_INDEL, M_NORM_LCSSEQ,
+    M_NORM_PREFIX, M_NORM_POSTFIX,
     /* Distance metrics (raw count) */
     M_LEVENSHTEIN, M_OSA,
     M_HAMMING, M_INDEL, M_LCSSEQ,
+    M_PREFIX, M_POSTFIX,
     M_INVALID
 };
 
@@ -67,26 +70,32 @@ static Method parse_method(const char *name) {
     if (!strcmp(name, "norm_hamming"))       return M_NORM_HAMMING;
     if (!strcmp(name, "norm_indel"))         return M_NORM_INDEL;
     if (!strcmp(name, "norm_lcsseq"))        return M_NORM_LCSSEQ;
+    if (!strcmp(name, "norm_prefix"))        return M_NORM_PREFIX;
+    if (!strcmp(name, "norm_postfix"))       return M_NORM_POSTFIX;
     /* raw distance */
     if (!strcmp(name, "levenshtein"))        return M_LEVENSHTEIN;
     if (!strcmp(name, "osa"))                return M_OSA;
     if (!strcmp(name, "hamming"))            return M_HAMMING;
     if (!strcmp(name, "indel"))              return M_INDEL;
     if (!strcmp(name, "lcsseq"))             return M_LCSSEQ;
+    if (!strcmp(name, "prefix"))             return M_PREFIX;
+    if (!strcmp(name, "postfix"))            return M_POSTFIX;
     return M_INVALID;
 }
 
 static bool is_similarity_method(Method m) {
-    return m <= M_NORM_LCSSEQ;
+    return m <= M_NORM_POSTFIX;
 }
 
 /*
  * Compute score for a single string pair.
  * Similarity metrics return 0-100; distance metrics return raw counts.
- * Returns SV_missval on error (e.g., hamming with unequal lengths).
+ * Returns SV_missval on error (e.g., hamming with unequal lengths and pad=false).
  */
 static double compute_score(const std::string &s1, const std::string &s2,
-                            Method method, double prefix_weight) {
+                            Method method, double prefix_weight,
+                            size_t ins_cost, size_t del_cost, size_t rep_cost,
+                            bool pad) {
     using namespace rapidfuzz;
     try {
         switch (method) {
@@ -105,18 +114,22 @@ static double compute_score(const std::string &s1, const std::string &s2,
         /* normalized similarity (0-1) → scale to 0-100 */
         case M_JARO:         return jaro_similarity(s1, s2)          * 100.0;
         case M_JARO_WINKLER: return jaro_winkler_similarity(s1, s2, prefix_weight) * 100.0;
-        case M_NORM_LEV:     return levenshtein_normalized_similarity(s1, s2) * 100.0;
+        case M_NORM_LEV:     return levenshtein_normalized_similarity(s1, s2, {ins_cost, del_cost, rep_cost}) * 100.0;
         case M_NORM_OSA:     return osa_normalized_similarity(s1, s2) * 100.0;
-        case M_NORM_HAMMING: return hamming_normalized_similarity(s1, s2) * 100.0;
+        case M_NORM_HAMMING: return hamming_normalized_similarity(s1, s2, pad) * 100.0;
         case M_NORM_INDEL:   return indel_normalized_similarity(s1, s2) * 100.0;
         case M_NORM_LCSSEQ:  return lcs_seq_normalized_similarity(s1, s2) * 100.0;
+        case M_NORM_PREFIX:  return prefix_normalized_similarity(s1, s2) * 100.0;
+        case M_NORM_POSTFIX: return postfix_normalized_similarity(s1, s2) * 100.0;
 
         /* raw distance counts */
-        case M_LEVENSHTEIN: return (double)levenshtein_distance(s1, s2);
+        case M_LEVENSHTEIN: return (double)levenshtein_distance(s1, s2, {ins_cost, del_cost, rep_cost});
         case M_OSA:         return (double)osa_distance(s1, s2);
-        case M_HAMMING:     return (double)hamming_distance(s1, s2);
+        case M_HAMMING:     return (double)hamming_distance(s1, s2, pad);
         case M_INDEL:       return (double)indel_distance(s1, s2);
         case M_LCSSEQ:      return (double)lcs_seq_distance(s1, s2);
+        case M_PREFIX:      return (double)prefix_distance(s1, s2);
+        case M_POSTFIX:     return (double)postfix_distance(s1, s2);
 
         default: return SV_missval;
         }
@@ -147,7 +160,7 @@ static std::string to_lower(const std::string &s) {
  * Pairwise mode
  *
  * Variables: str1  str2  output_score
- * argv:      "pairwise" method [nocase] [pw=0.1]
+ * argv:      "pairwise" method [nocase] [pw=0.1] [wt=X,Y,Z] [nopad]
  * ================================================================ */
 
 static ST_retcode do_pairwise(int argc, char *argv[]) {
@@ -166,23 +179,34 @@ static ST_retcode do_pairwise(int argc, char *argv[]) {
 
     bool nocase = false;
     double pw = 0.1;
+    size_t ins_cost = 1, del_cost = 1, rep_cost = 1;
+    bool pad = true;
     for (int a = 2; a < argc; a++) {
         if (!strcmp(argv[a], "nocase")) nocase = true;
         else if (!strncmp(argv[a], "pw=", 3)) pw = atof(argv[a] + 3);
+        else if (!strncmp(argv[a], "wt=", 3)) {
+            /* Parse "wt=X,Y,Z" as ins,del,rep costs */
+            char *p = argv[a] + 3;
+            ins_cost = strtoul(p, &p, 10);
+            if (*p == ',') p++;
+            del_cost = strtoul(p, &p, 10);
+            if (*p == ',') p++;
+            rep_cost = strtoul(p, &p, 10);
+        }
+        else if (!strcmp(argv[a], "nopad")) pad = false;
     }
 
     ST_int nobs = SF_nobs();
-    if (SF_nvar() != 3) {
-        sf_error("rapidfuzz pairwise: need exactly 3 variables\n");
-        return 198;
-    }
+    /* Variables 1,2 = input strings, variable 3 = output score.
+       SF_nvar() returns TOTAL dataset vars, not plugin-call vars,
+       so we cannot validate the count here. */
 
     for (ST_int obs = 1; obs <= nobs; obs++) {
         std::string s1 = read_string(1, obs);
         std::string s2 = read_string(2, obs);
         if (nocase) { s1 = to_lower(s1); s2 = to_lower(s2); }
 
-        double score = compute_score(s1, s2, method, pw);
+        double score = compute_score(s1, s2, method, pw, ins_cost, del_cost, rep_cost, pad);
         SF_vstore(3, obs, score);
     }
     return 0;
@@ -192,7 +216,7 @@ static ST_retcode do_pairwise(int argc, char *argv[]) {
  * Match mode
  *
  * Variables: str_all  best_score  best_idx
- * argv:      "match" method n_master n_ref [nocase] [pw=0.1]
+ * argv:      "match" method n_master n_ref [nocase] [pw=0.1] [wt=X,Y,Z] [nopad]
  *
  * Obs 1..n_master = master, (n_master+1)..(n_master+n_ref) = reference.
  * For each master obs, finds the best-scoring reference obs.
@@ -216,9 +240,20 @@ static ST_retcode do_match(int argc, char *argv[]) {
     int n_ref    = atoi(argv[3]);
     bool nocase = false;
     double pw = 0.1;
+    size_t ins_cost = 1, del_cost = 1, rep_cost = 1;
+    bool pad = true;
     for (int a = 4; a < argc; a++) {
         if (!strcmp(argv[a], "nocase")) nocase = true;
         else if (!strncmp(argv[a], "pw=", 3)) pw = atof(argv[a] + 3);
+        else if (!strncmp(argv[a], "wt=", 3)) {
+            char *p = argv[a] + 3;
+            ins_cost = strtoul(p, &p, 10);
+            if (*p == ',') p++;
+            del_cost = strtoul(p, &p, 10);
+            if (*p == ',') p++;
+            rep_cost = strtoul(p, &p, 10);
+        }
+        else if (!strcmp(argv[a], "nopad")) pad = false;
     }
 
     if (SF_nobs() != n_master + n_ref) {
@@ -247,7 +282,8 @@ static ST_retcode do_match(int argc, char *argv[]) {
         int best_j = 0;
 
         for (int j = 0; j < n_ref; j++) {
-            double s = compute_score(master[i], ref[j], method, pw);
+            double s = compute_score(master[i], ref[j], method, pw,
+                                     ins_cost, del_cost, rep_cost, pad);
             if (SF_is_missing(s)) continue;
 
             if (higher_better ? (s > best) : (s < best)) {
