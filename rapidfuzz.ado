@@ -135,23 +135,11 @@ program define rapidfuzz, rclass
     if "`nocase'" != "" display as text "  (case-insensitive)"
 end
 
-* --- Plugin loader (cross-platform cascade) ---
+* --- Plugin loader (gtools-style) ---
 program define _rapidfuzz_load_plugin
-    local plugin_loaded 0
-    foreach plat in darwin-arm64 darwin-x86_64 linux-x86_64 windows-x86_64 {
-        if !`plugin_loaded' {
-            capture findfile rapidfuzz_plugin.`plat'.plugin
-            if _rc == 0 {
-                capture program rapidfuzz_plugin, plugin using("`r(fn)'")
-                if _rc == 0 | _rc == 110 {
-                    local plugin_loaded 1
-                }
-            }
-        }
-    }
-    if !`plugin_loaded' {
-        display as error "rapidfuzz: cannot load plugin"
-        display as error "Ensure .plugin files are installed."
-        exit 601
-    }
+    if ( inlist("`c(os)'", "MacOSX") | strpos("`c(machine_type)'", "Mac") ) local c_os_ macosx
+    else local c_os_: di lower("`c(os)'")
+
+    cap program drop rapidfuzz_plugin
+    program rapidfuzz_plugin, plugin using("rapidfuzz_plugin_`c_os_'.plugin")
 end

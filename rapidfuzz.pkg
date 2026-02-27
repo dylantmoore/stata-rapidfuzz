@@ -11,7 +11,6 @@ d
 f rapidfuzz.ado
 f rapidfuzz_match.ado
 f rapidfuzz.sthlp
-f rapidfuzz_plugin.darwin-arm64.plugin
-f rapidfuzz_plugin.darwin-x86_64.plugin
-f rapidfuzz_plugin.linux-x86_64.plugin
-f rapidfuzz_plugin.windows-x86_64.plugin
+f rapidfuzz_plugin_macosx.plugin
+f rapidfuzz_plugin_unix.plugin
+f rapidfuzz_plugin_windows.plugin

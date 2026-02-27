@@ -26,28 +26,21 @@ CPP_STD = "-std=c++17"
 INCLUDE = "-I."
 
 PLATFORMS = {
-    "darwin-arm64": {
+    "macosx": {
         "cc": "gcc",
         "cxx": "g++",
         "cflags": "-O3 -fPIC -DSYSTEM=APPLEMAC -arch arm64",
         "cxxflags": f"{CPP_STD} -O3 -fPIC -DSYSTEM=APPLEMAC -arch arm64 {INCLUDE}",
         "ldflags": "-bundle -arch arm64",
     },
-    "darwin-x86_64": {
-        "cc": "gcc",
-        "cxx": "g++",
-        "cflags": "-O3 -fPIC -DSYSTEM=APPLEMAC -target x86_64-apple-macos10.12",
-        "cxxflags": f"{CPP_STD} -O3 -fPIC -DSYSTEM=APPLEMAC -target x86_64-apple-macos10.12 {INCLUDE}",
-        "ldflags": "-bundle -target x86_64-apple-macos10.12",
-    },
-    "linux-x86_64": {
+    "unix": {
         "cc": "gcc",
         "cxx": "g++",
         "cflags": "-O3 -fPIC -DSYSTEM=OPUNIX",
         "cxxflags": f"{CPP_STD} -O3 -fPIC -DSYSTEM=OPUNIX {INCLUDE}",
         "ldflags": "-shared",
     },
-    "windows-x86_64": {
+    "windows": {
         "cc": "x86_64-w64-mingw32-gcc",
         "cxx": "x86_64-w64-mingw32-g++",
         "cflags": "-O3 -DSYSTEM=STWIN32",
@@ -59,13 +52,12 @@ PLATFORMS = {
 
 def detect_platform():
     system = platform.system()
-    machine = platform.machine()
     if system == "Darwin":
-        return "darwin-arm64" if machine == "arm64" else "darwin-x86_64"
+        return "macosx"
     if system == "Linux":
-        return "linux-x86_64"
+        return "unix"
     if system == "Windows":
-        return "windows-x86_64"
+        return "windows"
     return None
 
 
@@ -83,7 +75,7 @@ def check_sdk():
 
 def build(plat, debug=False):
     cfg = PLATFORMS[plat]
-    output = os.path.join(OUTPUT_DIR, f"{PLUGIN_NAME}.{plat}.plugin")
+    output = os.path.join(OUTPUT_DIR, f"{PLUGIN_NAME}_{plat}.plugin")
     obj_c = "stplugin.o"
     obj_cpp = "rapidfuzz_plugin.o"
 
@@ -93,7 +85,7 @@ def build(plat, debug=False):
         cflags = cflags.replace("-O3", "-O0 -g -fsanitize=address")
         cxxflags = cxxflags.replace("-O3", "-O0 -g -fsanitize=address")
 
-    print(f"Building {PLUGIN_NAME}.{plat}.plugin...")
+    print(f"Building {PLUGIN_NAME}_{plat}.plugin...")
 
     # Step 1: Compile stplugin.c as C
     cmd1 = f"{cfg['cc']} {cflags} -c {C_SOURCE} -o {obj_c}"
